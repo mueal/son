@@ -64,6 +64,10 @@
   }
   .chip.on{background:var(--court); border-color:var(--court); color:#fff;}
 
+  .modeseg{display:flex; gap:0; margin-bottom:12px; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:3px;}
+  .seg{flex:1; font-size:13.5px; font-weight:600; padding:9px; min-height:auto; border:none; border-radius:9px; background:transparent; color:var(--muted); transition:.15s;}
+  .seg.on{background:var(--court); color:#fff;}
+
   .progress{height:5px; background:var(--surface2); border-radius:999px; overflow:hidden; margin-bottom:14px;}
   .progress > div{height:100%; width:0; background:var(--court); border-radius:999px; transition:width .3s;}
 
@@ -73,6 +77,9 @@
     position:relative; overflow:hidden;
   }
   .card:before{content:""; position:absolute; top:0; left:0; right:0; height:3px; background:var(--court);}
+  .card.tappable{cursor:pointer;}
+  .card.tappable:active{transform:scale(.992); background:var(--surface2);}
+  .taphint{margin-top:14px; padding-top:10px; border-top:1px dashed var(--line); font-size:11.5px; color:var(--faint); text-align:right; pointer-events:none;}
   .meta{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
   .meta-l{display:flex; align-items:center; gap:8px;}
   .cat{font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:999px;}
@@ -140,6 +147,11 @@
     </div>
   </header>
 
+  <div class="modeseg" id="modeseg">
+    <button class="seg on" id="seg-quiz" data-mode="quiz">퀴즈 모드</button>
+    <button class="seg" id="seg-study" data-mode="study">공부 모드</button>
+  </div>
+
   <div class="stats">
     <div class="stat"><div class="v" id="s-total">0</div><div class="l">문항</div></div>
     <div class="stat ok"><div class="v" id="s-right">0</div><div class="l">맞힘</div></div>
@@ -148,11 +160,11 @@
   </div>
 
   <div class="filters" id="filters"></div>
-  <div class="progress"><div id="bar"></div></div>
+  <div class="progress" id="progress"><div id="bar"></div></div>
 
   <div class="card" id="card"></div>
 
-  <div class="controls">
+  <div class="controls" id="controls">
     <button class="nav" id="prev" aria-label="이전">‹</button>
     <button class="reveal" id="reveal">답 보기</button>
     <button class="nav" id="next" aria-label="다음">›</button>
@@ -163,9 +175,9 @@
   </div>
 
   <div class="toolbar">
-    <button id="shuffle">↺ 섞기</button>
-    <button id="reset">처음부터</button>
-    <label class="toggle"><span>틀린 문제만</span><input type="checkbox" id="wrongonly"></label>
+    <button id="toolbar-shuffle">↺ 섞기</button>
+    <button id="toolbar-reset">처음부터</button>
+    <label class="toggle" id="wrongonly-label"><span>틀린 문제만</span><input type="checkbox" id="wrongonly"></label>
   </div>
 
   <div class="foot">
@@ -181,7 +193,7 @@ const CATS = ["전체","규정","지도방법","용어"];
 const KEY = "tennis_oral_quiz_v1";
 
 let results = {};
-let pref = { cat:"전체", wrongOnly:false };
+let pref = { cat:"전체", wrongOnly:false, mode:"quiz" };
 try{
   const saved = JSON.parse(localStorage.getItem(KEY) || "{}");
   results = saved.results || {};
@@ -228,35 +240,63 @@ function renderFilters(){
 }
 function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
+let grade_show=false;
+function setModeUI(){
+  const study = pref.mode==="study";
+  document.getElementById("seg-quiz").classList.toggle("on", !study);
+  document.getElementById("seg-study").classList.toggle("on", study);
+  // 카드/진행바/이전·다음/섞기/필터는 두 모드 공통으로 표시
+  document.getElementById("card").style.display = "flex";
+  document.getElementById("card").classList.toggle("tappable", study);
+  document.getElementById("progress").style.display = "block";
+  document.getElementById("controls").style.display = "flex";
+  // 공부 모드: '답 보기' 버튼 숨김(이전/다음만), 채점·통계·틀린문제만 숨김
+  document.getElementById("reveal").style.display = study?"none":"";
+  document.getElementById("grade").style.display = study?"none":(grade_show?"flex":"none");
+  document.querySelector(".stats").style.display = study?"none":"flex";
+  document.getElementById("toolbar-reset").style.display = study?"none":"";
+  document.getElementById("wrongonly-label").style.display = study?"none":"flex";
+}
+
 function render(){
-  renderFilters(); renderStats();
+  renderFilters();
+  setModeUI();
+
+  renderStats();
   const card = document.getElementById("card");
   const total = order.length;
   document.getElementById("bar").style.width = total? Math.round(idx/total*100)+"%" : "0%";
 
   const grade = document.getElementById("grade");
   const reveal = document.getElementById("reveal");
+  const study = pref.mode==="study";
 
   if(total===0){
     card.innerHTML = '<div class="done"><div class="big">🎯</div><h2>문제가 없습니다</h2><p>'+(pref.wrongOnly?"틀린 문제가 없어요. 잘하고 있어요!":"해당 분야에 문제가 없습니다.")+'</p></div>';
-    grade.classList.remove("show"); reveal.style.display="none"; return;
+    grade_show=false; grade.classList.remove("show"); grade.style.display="none"; if(!study) reveal.style.display="none"; return;
   }
   if(idx>=total){
+    if(study){
+      card.innerHTML = '<div class="done"><div class="big">📚</div><h2>마지막 문항입니다</h2><p>처음으로 돌아가려면 “‹”를 누르세요</p></div>';
+      grade.style.display="none"; return;
+    }
     const list = order;
     const right = list.filter(n=>results[n]==="right").length;
     const done = list.filter(n=>results[n]).length;
     const pct = done? Math.round(right/done*100):0;
     card.innerHTML = '<div class="done"><div class="big">🏆</div><h2>한 바퀴 완료!</h2><p>'+right+'/'+done+' 정답 · 정답률 '+pct+'%</p></div>';
-    grade.classList.remove("show"); reveal.style.display="none"; return;
+    grade_show=false; grade.classList.remove("show"); grade.style.display="none"; reveal.style.display="none"; return;
   }
-  reveal.style.display="";
+  if(!study) reveal.style.display="";
 
   const q = QUIZ.find(x=>x.n===order[idx]);
   const prev = results[q.n];
-  const markHtml = prev? '<span class="prevmark '+prev+'">'+(prev==="right"?"✓ 맞힌 문제":"✕ 틀린 문제")+'</span>' : '';
+  const markHtml = (prev && !study)? '<span class="prevmark '+prev+'">'+(prev==="right"?"✓ 맞힌 문제":"✕ 틀린 문제")+'</span>' : '';
 
+  // 공부 모드 또는 답 보기를 누른 경우 답을 펼침
+  const showAnswer = study || revealed;
   let ansHtml;
-  if(revealed){
+  if(showAnswer){
     const single = q.a.length===1 ? " single" : "";
     const items = q.a.map(t=>'<li>'+esc(t)+'</li>').join("");
     ansHtml = '<div class="answer'+single+'"><div class="label">모범 답안</div><ul>'+items+'</ul></div>';
@@ -264,13 +304,18 @@ function render(){
     ansHtml = '<div class="hint">머릿속으로 답을 말해본 뒤<br><b>답 보기</b>를 누르세요</div>';
   }
 
+  const tapHint = study ? '<div class="taphint">탭하여 다음 ›</div>' : '';
   card.innerHTML =
     '<div class="meta"><div class="meta-l"><span class="cat '+q.cat+'">'+q.cat+'</span>'+
     '<span class="qid">Q'+q.n+' · '+(idx+1)+'/'+total+'</span></div>'+markHtml+'</div>'+
-    '<div class="question">'+esc(q.q)+'</div>'+ansHtml;
+    '<div class="question">'+esc(q.q)+'</div>'+ansHtml+tapHint;
 
+  if(study){ grade.style.display="none"; return; }
+  grade_show = revealed;
   grade.classList.toggle("show", revealed);
+  grade.style.display = revealed?"flex":"none";
 }
+
 
 function doReveal(){ revealed=true; render(); }
 function doGrade(v){
@@ -291,8 +336,15 @@ document.getElementById("right").onclick=()=>doGrade("right");
 document.getElementById("wrong").onclick=()=>doGrade("wrong");
 document.getElementById("next").onclick=()=>go(1);
 document.getElementById("prev").onclick=()=>go(-1);
-document.getElementById("shuffle").onclick=shuffle;
-document.getElementById("reset").onclick=()=>{
+
+// 공부 모드: 카드(Q&A 박스)를 탭하면 다음 문항으로
+document.getElementById("card").addEventListener("click",()=>{
+  if(pref.mode!=="study") return;
+  if(idx>=order.length){ idx=0; revealed=false; render(); }  // 마지막 안내 화면이면 처음으로
+  else go(1);
+});
+document.getElementById("toolbar-shuffle").onclick=shuffle;
+document.getElementById("toolbar-reset").onclick=()=>{
   if(confirm("채점 기록을 모두 지우고 처음부터 시작할까요?")){
     results={}; pref.wrongOnly=false; document.getElementById("wrongonly").checked=false;
     save(); buildOrder(); render();
@@ -302,12 +354,26 @@ const wo=document.getElementById("wrongonly");
 wo.checked=pref.wrongOnly;
 wo.onchange=e=>{ pref.wrongOnly=e.target.checked; buildOrder(); save(); render(); };
 
+function setMode(m){
+  pref.mode=m;
+  // 공부 모드로 가면 채점 기반 '틀린 문제만'은 해제 (전체 문항 열람용)
+  if(m==="study" && pref.wrongOnly){ pref.wrongOnly=false; document.getElementById("wrongonly").checked=false; }
+  save();
+  revealed=false;
+  buildOrder();
+  render();
+}
+document.getElementById("seg-quiz").onclick=()=>setMode("quiz");
+document.getElementById("seg-study").onclick=()=>setMode("study");
+
 document.addEventListener("keydown",e=>{
   if(e.key==="ArrowRight") go(1);
   else if(e.key==="ArrowLeft") go(-1);
-  else if(e.key===" "||e.key==="Enter"){ e.preventDefault(); if(!revealed) doReveal(); }
+  else if(pref.mode==="quiz" && (e.key===" "||e.key==="Enter")){ e.preventDefault(); if(!revealed) doReveal(); }
 });
 
+// 시작 시 저장된 모드 세그먼트 반영
+if(pref.mode==="study"){ document.getElementById("seg-study").classList.add("on"); document.getElementById("seg-quiz").classList.remove("on"); }
 buildOrder(); render();
 </script>
 </body>
